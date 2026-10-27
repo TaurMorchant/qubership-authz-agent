@@ -2,7 +2,8 @@
 # Build workflow for qubership-authz-agent.
 #
 # Delegates to the shared Go build workflow in qubership-core-infra, which runs
-# go test, SonarQube analysis, and Docker image builds.
+# go test, SonarQube analysis, and Docker image builds.  The codecov job uploads
+# the product module's coverage to Codecov.
 #
 # Module configuration note
 # -------------------------
@@ -67,6 +68,46 @@ jobs:
     # instead of `secrets: inherit` (zizmor: secrets-inherit).
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Runs the product module's tests and uploads their coverage to Codecov.  The
+  # shared workflow uploads its coverage profiles as artifacts only when the
+  # Sonar project key is set, and a pull request from a fork gets no repository
+  # variables, so this job produces its own profile.  The modules under test/ are test suites
+  # whose profiles cover only test code, so they are left out.
+  #
+  # Build gate does not wait for this job, so an upload that Codecov rejects
+  # fails this job without blocking the merge.
+  codecov:
+    name: Codecov
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The shared workflow runs the same command for the product module, so
+      # Codecov and Sonar measure the same packages.  Keep -coverpkg equal to
+      # the cover-packages of the "." entry in go-module-configs above.
+      - name: Run the tests with coverage
+        run: go test ./... -coverpkg=./... -coverprofile coverage.out
+      # GitHub withholds secrets from a pull request opened from a fork, so the
+      # token is empty there, and Codecov accepts a tokenless upload from a fork
+      # of a public repository.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          flags: unit
+          disable_search: true
+          fail_ci_if_error: true
 
   build-gate:
     name: Build gate
